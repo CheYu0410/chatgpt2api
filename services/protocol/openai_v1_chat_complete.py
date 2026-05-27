@@ -109,6 +109,31 @@ def build_tool_instructions(tools: list[dict[str, Any]] | None, tool_choice: Any
     )
 
 
+def _tolerant_json_parse(text: str) -> dict[str, Any] | None:
+    """Try to parse JSON, with fallback for truncated content.
+    Attempts to close unclosed brackets/braces to recover partial tool calls.
+    """
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Try to recover truncated JSON by closing open brackets
+    # Count open braces/brackets and try appending closers
+    text = text.strip()
+    if not text:
+        return None
+
+    # Simple approach: try appending closing chars
+    for suffix in ["", "}", "}]", "}]}", "}}", "}}}" ]:
+        try:
+            return json.loads(text + suffix)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    return None
+
+
 def parse_tool_calls(response_text: str) -> tuple[list[dict[str, Any]], str]:
     """Parse ```json action ... ``` blocks from the response.
     Returns (tool_calls, clean_text) where tool_calls is a list of {"name": str, "arguments": dict}
@@ -153,13 +178,13 @@ def parse_tool_calls(response_text: str) -> tuple[list[dict[str, Any]], str]:
             json_content = response_text[content_start:closing].strip()
             blocks_to_remove.append((block_start, closing + 3))
         else:
-            # Unclosed block — try to parse what we have
+            # Unclosed block — try to parse what we have (may be truncated)
             json_content = response_text[content_start:].strip()
             blocks_to_remove.append((block_start, len(response_text)))
 
         if json_content:
-            try:
-                parsed = json.loads(json_content)
+            parsed = _tolerant_json_parse(json_content)
+            if parsed:
                 name = parsed.get("tool") or parsed.get("name") or ""
                 args = (
                     parsed.get("parameters")
@@ -169,8 +194,6 @@ def parse_tool_calls(response_text: str) -> tuple[list[dict[str, Any]], str]:
                 )
                 if name and isinstance(args, dict):
                     tool_calls.append({"name": name, "arguments": args})
-            except (json.JSONDecodeError, ValueError):
-                pass
 
         pos = closing + 3 if closing >= 0 else len(response_text)
 
