@@ -108,7 +108,7 @@ def create_router() -> APIRouter:
         identity = require_identity(authorization)
         payload = body.model_dump(mode="python")
         model = str(payload.get("model") or "auto")
-        request_preview = request_text(payload.get("prompt"), payload.get("messages"))
+        request_preview = request_text(payload.get("prompt"), payload.get("messages"), payload.get("tools"))
         call = LoggedCall(identity, "/v1/chat/completions", model, "文本生成", request_text=request_preview)
         await filter_or_log(call, request_preview)
         return await call.run(openai_v1_chat_complete.handle, payload)

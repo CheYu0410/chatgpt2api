@@ -17,6 +17,18 @@ from services.protocol.openai_v1_chat_complete import collect_chat_content, stre
 XML_TOOL_RULE = """Tool output adapter: when calling tools, output ONLY this XML and no prose/markdown:
 <tool_calls><tool_call><tool_name>TOOL_NAME</tool_name><parameters><PARAM><![CDATA[value]]></PARAM></parameters></tool_call></tool_calls>"""
 
+# Secondary format using fenced code blocks (more reliable with ChatGPT backend)
+JSON_ACTION_TOOL_RULE = """To call tools, output ONLY a fenced JSON action block and no prose/markdown:
+
+```json action
+{
+  "tool": "TOOL_NAME",
+  "parameters": {
+    "param": "value"
+  }
+}
+```"""
+
 
 @dataclass
 class MessageRequest:
@@ -43,23 +55,33 @@ def build_tool_prompt(tools: object) -> str:
             continue
         name, desc, schema = _tool_meta(tool)
         if name:
-            blocks.append(f"Tool: {name}\nDescription: {desc}\nParameters: {json.dumps(schema, ensure_ascii=False)}")
+            param_str = ""
+            if schema and isinstance(schema, dict):
+                param_str = f"\n  Params: {json.dumps(schema, ensure_ascii=False)}"
+            blocks.append(f"Tool: {name}\nDescription: {desc}{param_str}")
     if not blocks:
         return ""
     return "Available tools:\n" + "\n".join(blocks) + """
 
 Tool use rules:
-- If the user asks to list/read/search files, inspect project state, run a command, or answer from local code, you MUST call a suitable tool first. Do not say you cannot access files.
-- To call tools, output ONLY XML and no prose/markdown:
-<tool_calls><tool_call><tool_name>TOOL_NAME</tool_name><parameters><PARAM><![CDATA[value]]></PARAM></parameters></tool_call></tool_calls>
-- Put parameters under <parameters> using the exact schema names.
-""".strip()
+- If you need to use a tool, output ONLY a fenced JSON action block and no prose/markdown:
+```json action
+{
+  "tool": "TOOL_NAME",
+  "parameters": {
+    "param": "value"
+  }
+}
+```
+- Put parameters under "parameters" using the exact schema names.
+- You can output multiple action blocks to call multiple tools in one response.
+- After calling a tool, wait for the tool result before proceeding.""".strip()
 
 
 def merge_system(system: object, extra: str) -> object:
     system = compact_system(system)
     if _has_claude_code_system(system):
-        extra = XML_TOOL_RULE
+        extra = JSON_ACTION_TOOL_RULE
     if not extra:
         return system
     if isinstance(system, str) and system.strip():
@@ -174,19 +196,49 @@ def content_blocks(text: str, tools: object = None) -> tuple[list[dict[str, obje
 
 
 def strip_tool_markup(text: str) -> str:
-    return re.sub(r"(?is)<tool_calls\b[^>]*>.*?</tool_calls>|<tool_call\b[^>]*>.*?</tool_call>|<function_call\b[^>]*>.*?</function_call>|<invoke\b[^>]*>.*?</invoke>", "", text or "").strip()
+    # Strip both XML-style and fenced-code-style tool calls
+    text = re.sub(r"(?is)<tool_calls\b[^>]*>.*?</tool_calls>|<tool_call\b[^>]*>.*?</tool_call>|<function_call\b[^>]*>.*?</function_call>|<invoke\b[^>]*>.*?</invoke>", "", text or "")
+    text = re.sub(r"(?is)```json\s+action\s*.*?\n.*?```", "", text)
+    return text.strip()
 
 
 def streamable_text(text: str) -> str:
     text = text or ""
+    # Check for XML-style tool calls
     match = re.search(r"(?is)<tool_calls\b|<tool_call\b|<function_call\b|<invoke\b", text)
-    return text[:match.start()].rstrip() if match else text
+    if match:
+        return text[:match.start()].rstrip()
+    # Check for fenced-code-style tool calls
+    match = re.search(r"(?is)```json\s+action", text)
+    if match:
+        return text[:match.start()].rstrip()
+    return text
 
 
 def parse_tool_calls(text: str) -> list[tuple[str, dict[str, object]]]:
-    text = re.sub(r"(?is)```.*?```", "", text or "").strip()
-    blocks = re.findall(r"(?is)<tool_call\b[^>]*>(.*?)</tool_call>|<function_call\b[^>]*>(.*?)</function_call>|<invoke\b[^>]*>(.*?)</invoke>", text)
-    result = []
+    result: list[tuple[str, dict[str, object]]] = []
+
+    # 1) Parse fenced ```json action blocks (preferred format for ChatGPT backend)
+    fenced_blocks = re.findall(r"(?is)```json\s+action\s*\n(.*?)\n```", text)
+    for block in fenced_blocks:
+        block = block.strip()
+        if not block:
+            continue
+        try:
+            parsed = json.loads(block)
+            name = parsed.get("tool") or parsed.get("name") or ""
+            args = parsed.get("parameters") or parsed.get("arguments") or parsed.get("input") or {}
+            if name and isinstance(args, dict):
+                result.append((name, args))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    if result:
+        return result
+
+    # 2) Fallback: parse XML-style tool calls (legacy)
+    text_stripped = re.sub(r"(?is)```.*?```", "", text or "").strip()
+    blocks = re.findall(r"(?is)<tool_call\b[^>]*>(.*?)</tool_call>|<function_call\b[^>]*>(.*?)</function_call>|<invoke\b[^>]*>(.*?)</invoke>", text_stripped)
     for block in (next((part for part in match if part), "") for match in blocks):
         name = xml_value(block, "tool_name") or xml_value(block, "name") or xml_value(block, "function")
         params = xml_value(block, "parameters") or xml_value(block, "input") or xml_value(block, "arguments") or "{}"
