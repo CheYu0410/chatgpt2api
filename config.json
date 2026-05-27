@@ -1,10 +1,10 @@
 {
-  "auth-key": "chatgpt2api",
-  "refresh_account_interval_minute": 60,
+  "auth-key": "tagyu51680410",
+  "refresh_account_interval_minute": 5,
   "image_retention_days": 15,
   "image_poll_timeout_secs": 120,
   "auto_remove_rate_limited_accounts": false,
-  "auto_remove_invalid_accounts": true,
+  "auto_remove_invalid_accounts": false,
   "log_levels": [
     "debug",
     "error",
@@ -46,5 +46,16 @@
       "images": false
     }
   },
-  "image_account_concurrency": 3
+  "image_account_concurrency": 3,
+  "image_poll_interval_secs": 10,
+  "image_poll_initial_wait_secs": 10,
+  "image_storage": {
+    "enabled": false,
+    "mode": "local",
+    "webdav_url": "",
+    "webdav_username": "",
+    "webdav_password": "",
+    "webdav_root_path": "chatgpt2api/images",
+    "public_base_url": ""
+  }
 }
