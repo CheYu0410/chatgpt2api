@@ -240,11 +240,9 @@ class BaseMailProvider:
             ref = _message_tracking_ref(message)
             if ref in seen_refs:
                 return None
-            code = _extract_code(message)
-            if code:
-                seen_value.append(ref)
-                seen_refs.add(ref)
-            return code
+            seen_value.append(ref)
+            seen_refs.add(ref)
+            return _extract_code(message)
 
         return self.wait_for(mailbox, extract_unseen_code)
 
@@ -516,22 +514,37 @@ class CloudMailGenProvider(BaseMailProvider):
         messages = [item for item in items if isinstance(item, dict) and _message_matches_email(item, address)]
         if not messages:
             return None
-        item = messages[0]
-        text_content, html_content = _extract_content(item)
-        return {
-            "provider": self.name,
-            "mailbox": address,
-            "message_id": str(item.get("id") or item.get("_id") or item.get("messageId") or ""),
-            "subject": str(item.get("subject") or ""),
-            "sender": str(item.get("from") or item.get("sender") or ""),
-            "text_content": text_content,
-            "html_content": html_content,
-            "received_at": _parse_received_at(
-                item.get("createdAt") or item.get("created_at") or item.get("receivedAt") or item.get("date") or item.get("timestamp")
-            ),
-            "to": item.get("to") or item.get("toEmail") or item.get("mailTo"),
-            "raw": item,
-        }
+        # 遍歷所有郵件，跳過已經處理過的（不管有沒有找到驗證碼）
+        seen_value = mailbox.get("_seen_code_message_refs", [])
+        seen_refs = {str(item) for item in seen_value} if isinstance(seen_value, list) else set()
+        for item in messages:
+            message_id = str(item.get("id") or item.get("_id") or item.get("messageId") or "")
+            ref = f"id:{self.name}:{address}:{message_id}" if message_id else None
+            if ref and ref in seen_refs:
+                continue
+            text_content, html_content = _extract_content(item)
+            result = {
+                "provider": self.name,
+                "mailbox": address,
+                "message_id": message_id,
+                "subject": str(item.get("subject") or ""),
+                "sender": str(item.get("from") or item.get("sender") or ""),
+                "text_content": text_content,
+                "html_content": html_content,
+                "received_at": _parse_received_at(
+                    item.get("createdAt") or item.get("created_at") or item.get("receivedAt") or item.get("date") or item.get("timestamp")
+                ),
+                "to": item.get("to") or item.get("toEmail") or item.get("mailTo"),
+                "raw": item,
+            }
+            # 無論是否找到驗證碼，都標記為已處理
+            if ref:
+                if not isinstance(mailbox.get("_seen_code_message_refs"), list):
+                    mailbox["_seen_code_message_refs"] = []
+                mailbox["_seen_code_message_refs"].append(ref)
+            return result
+        # 所有郵件都已處理過
+        return None
 
     def close(self) -> None:
         self.session.close()
