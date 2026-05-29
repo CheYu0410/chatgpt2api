@@ -53,8 +53,8 @@ def _compact_schema(schema: dict[str, Any] | None) -> str:
 
 def build_tool_instructions(tools: list[dict[str, Any]] | None, tool_choice: Any = None) -> str:
     """Build a system prompt fragment that instructs the model to output tool calls
-    using the ```json action fenced code block format.
-    Mirrors cursor2api converter.ts buildToolInstructions().
+    using a structured text format that is easy to parse with regex.
+    Format: [TOOL: tool_name, param1: value1, param2: value2]
     """
     if not tools:
         return ""
@@ -70,12 +70,13 @@ def build_tool_instructions(tools: list[dict[str, Any]] | None, tool_choice: Any
 
         param_str = ""
         if schema and isinstance(schema, dict):
-            compact = _compact_schema(schema)
-            if compact and compact != "{}":
-                param_str = f"\n  Params: {compact}"
+            props = schema.get("properties", {})
+            if props:
+                param_names = ", ".join(props.keys())
+                param_str = f" (params: {param_names})"
 
         if name:
-            lines.append(f"- **{name}**: {desc}{param_str}" if desc else f"- **{name}**{param_str}")
+            lines.append(f"- {name}: {desc}{param_str}" if desc else f"- {name}{param_str}")
 
     if not lines:
         return ""
@@ -84,27 +85,21 @@ def build_tool_instructions(tools: list[dict[str, Any]] | None, tool_choice: Any
     force_constraint = ""
     if isinstance(tool_choice, dict):
         if tool_choice.get("type") == "any":
-            force_constraint = '\n\n**MANDATORY**: Your response MUST include at least one ```json action block. Responding with plain text only is NOT acceptable when tool_choice is "any".'
+            force_constraint = '\n\n**IMPORTANT**: You MUST use at least one [TOOL: ...] call in your response. Do not respond with plain text only.'
         elif tool_choice.get("type") == "tool":
             required_name = tool_choice.get("name", "")
-            force_constraint = f'\n\n**MANDATORY**: Your response MUST call the "{required_name}" action using a ```json action block. No other response format is acceptable.'
+            force_constraint = f'\n\n**IMPORTANT**: You MUST call the "{required_name}" tool using the [TOOL: ...] format. Do not respond with plain text only.'
 
     return (
-        "You have access to the following tools. To call a tool, output it in your response using this structured format:\n\n"
-        "```json action\n"
-        "{\n"
-        '  "tool": "TOOL_NAME",\n'
-        '  "parameters": {\n'
-        '    "param": "value"\n'
-        "  }\n"
-        "}\n"
-        "```\n\n"
+        "You have access to the following tools. When you need to use a tool, output it in this exact format (one tool per line):\n\n"
+        "[TOOL: tool_name, parameter_name: parameter_value, ...]\n\n"
+        "Rules:\n"
+        "- Output ONLY the [TOOL: ...] line when calling a tool. No extra text, no markdown, no code blocks.\n"
+        "- If multiple tools needed, output multiple [TOOL: ...] lines.\n"
+        "- If no tool needed, respond normally in plain text.\n\n"
         "Available tools:\n"
         + "\n".join(lines)
         + "\n\n"
-        "Include the structured block when performing actions. For independent actions, include multiple blocks. "
-        "For dependent actions, wait for each result. Keep explanatory text brief. "
-        "If you have completed the task or have nothing to execute, respond in plain text without any structured block."
         + force_constraint
     )
 
@@ -135,71 +130,53 @@ def _tolerant_json_parse(text: str) -> dict[str, Any] | None:
 
 
 def parse_tool_calls(response_text: str) -> tuple[list[dict[str, Any]], str]:
-    """Parse ```json action ... ``` blocks from the response.
+    """Parse [TOOL: name, param: value, ...] lines from the response.
     Returns (tool_calls, clean_text) where tool_calls is a list of {"name": str, "arguments": dict}
-    and clean_text is the response with tool call blocks removed.
-    Mirrors cursor2api converter.ts parseToolCalls().
+    and clean_text is the response with tool call lines removed.
     """
     tool_calls: list[dict[str, Any]] = []
-    blocks_to_remove: list[tuple[int, int]] = []
+    lines_to_remove: list[tuple[int, int]] = []
 
-    open_pattern = re.compile(r"```json(?:\s+action)?")
-    pos = 0
-    while True:
-        m = open_pattern.search(response_text, pos)
-        if not m:
-            break
-        block_start = m.start()
-        content_start = m.end()
+    # Match [TOOL: tool_name, key: value, ...] — value can be quoted or unquoted
+    tool_pattern = re.compile(
+        r'\[TOOL:\s*(\w+)'
+        r'((?:\s*,\s*\w+\s*:\s*(?:'
+        r'"(?:[^"\\]|\\.)*"'  # double-quoted value
+        r"|'(?:[^'\\]|\\.)*'"  # single-quoted value
+        r'|[^,\]]+'  # unquoted value
+        r'))*)\s*\]',
+        re.IGNORECASE
+    )
 
-        # Scan for closing ``` respecting JSON string boundaries
-        i = content_start
-        in_string = False
-        closing = -1
-        while i < len(response_text) - 2:
-            ch = response_text[i]
-            if ch == '"':
-                # Count preceding backslashes
-                bs = 0
-                j = i - 1
-                while j >= content_start and response_text[j] == "\\":
-                    bs += 1
-                    j -= 1
-                if bs % 2 == 0:
-                    in_string = not in_string
-                i += 1
-                continue
-            if not in_string and response_text[i : i + 3] == "```":
-                closing = i
-                break
-            i += 1
+    for m in tool_pattern.finditer(response_text):
+        name = m.group(1).strip()
+        params_str = m.group(2).strip()
+        args: dict[str, Any] = {}
 
-        if closing >= 0:
-            json_content = response_text[content_start:closing].strip()
-            blocks_to_remove.append((block_start, closing + 3))
-        else:
-            # Unclosed block — try to parse what we have (may be truncated)
-            json_content = response_text[content_start:].strip()
-            blocks_to_remove.append((block_start, len(response_text)))
+        if params_str:
+            # Parse key: value pairs
+            param_pattern = re.compile(
+                r'(\w+)\s*:\s*('
+                r'"(?:[^"\\]|\\.)*"'
+                r"|'(?:[^'\\]|\\.)*'"
+                r'|[^,\]]+'
+                r')'
+            )
+            for param_m in param_pattern.finditer(params_str):
+                key = param_m.group(1).strip()
+                val = param_m.group(2).strip()
+                # Strip quotes
+                if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):
+                    val = val[1:-1]
+                args[key] = val
 
-        if json_content:
-            parsed = _tolerant_json_parse(json_content)
-            if parsed:
-                name = parsed.get("tool") or parsed.get("name") or ""
-                args = (
-                    parsed.get("parameters")
-                    or parsed.get("arguments")
-                    or parsed.get("input")
-                    or {}
-                )
-                if name and isinstance(args, dict):
-                    tool_calls.append({"name": name, "arguments": args})
+        if name:
+            tool_calls.append({"name": name, "arguments": args})
+            lines_to_remove.append((m.start(), m.end()))
 
-        pos = closing + 3 if closing >= 0 else len(response_text)
-
-    # Remove tool call blocks from text (reverse order to preserve indices)
+    # Remove tool call lines from text (reverse order to preserve indices)
     clean_text = response_text
-    for start, end in reversed(blocks_to_remove):
+    for start, end in reversed(lines_to_remove):
         clean_text = clean_text[:start] + clean_text[end:]
 
     return tool_calls, clean_text.strip()
@@ -212,7 +189,7 @@ def has_tool_calls(text: str) -> bool:
 
 def format_tool_result_message(tool_call_id: str, content: str) -> str:
     """Format a tool result as natural language for the backend."""
-    return f"Tool result (id: {tool_call_id}): {content}"
+    return f"[TOOL RESULT] Tool '{tool_call_id}' returned: {content}\n\nBased on this result, please continue answering the user's question."
 
 
 def merge_system_with_tools(system: Any, tool_instructions: str) -> str:
@@ -388,8 +365,9 @@ def stream_image_chat_completion(image_outputs: Iterable[ImageOutput], model: st
 
 
 def _extract_tool_result_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI-format tool_result messages to plain text for the backend.
-    Messages with role='tool' or messages whose content type is 'tool_result' get converted.
+    """Convert OpenAI-format tool_result messages and tool_calls to plain text for the backend.
+    Messages with role='tool' get converted to user messages.
+    Messages with tool_calls (assistant) get flattened to text.
     """
     result = []
     for msg in messages:
@@ -405,8 +383,25 @@ def _extract_tool_result_messages(messages: list[dict[str, Any]]) -> list[dict[s
             result.append({"role": "user", "content": text})
             continue
 
-        # Also handle messages that have tool_calls in an assistant message (from a previous turn)
-        # — keep them as-is so the backend sees the conversation history.
+        if role == "assistant" and msg.get("tool_calls") is not None:
+            tool_calls = msg.get("tool_calls")
+            if not isinstance(tool_calls, (list, tuple)):
+                tool_calls = [tool_calls]
+            content = msg.get("content", "") or ""
+            for tc in tool_calls:
+                tc_lines = []
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    if isinstance(fn, dict):
+                        name = fn.get("name", "")
+                        args = fn.get("arguments", "{}")
+                        tc_lines.append(f"[TOOL: {name}, arguments: {args}]")
+                tc_text = "\n".join(tc_lines)
+                flat_content = (content + "\n" + tc_text).strip() if content else tc_text
+                if flat_content:
+                    result.append({"role": "assistant", "content": flat_content})
+            continue
+
         result.append(msg)
 
     return result

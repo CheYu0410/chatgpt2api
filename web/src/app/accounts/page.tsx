@@ -44,6 +44,7 @@ import {
   deleteAccounts,
   exportAccounts,
   fetchAccounts,
+  fetchRefreshProgress,
   refreshAccounts,
   updateAccount,
   type Account,
@@ -196,6 +197,7 @@ function AccountsPageContent() {
   const [editStatus, setEditStatus] = useState<AccountStatus>("正常");
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{ running: boolean; total: number; done: number; errors: number } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -314,21 +316,32 @@ function AccountsPageContent() {
 
     setIsRefreshing(true);
     try {
-      const data = await refreshAccounts(accessTokens);
-      setAccounts(data.items);
-      setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
-      if (data.errors.length > 0) {
-        const firstError = data.errors[0]?.error;
-        toast.error(
-          `刷新成功 ${data.refreshed} 个，失败 ${data.errors.length} 个${firstError ? `，首个错误：${firstError}` : ""}`,
-        );
-      } else {
-        toast.success(`刷新成功 ${data.refreshed} 个账户`);
-      }
+      // 啟動背景刷新
+      await refreshAccounts(accessTokens);
+      toast.success(`已启动刷新任务，共 ${accessTokens.length} 个账号，请稍候...`);
+
+      // 輪詢進度
+      const pollInterval = setInterval(async () => {
+        try {
+          const progress = await fetchRefreshProgress();
+          setRefreshProgress(progress);
+          if (!progress.running) {
+            clearInterval(pollInterval);
+            setIsRefreshing(false);
+            setRefreshProgress(null);
+            // 重新載入帳號列表
+            await loadAccounts();
+            toast.success(`刷新完成，共 ${progress.done} 个账号`);
+          }
+        } catch {
+          clearInterval(pollInterval);
+          setIsRefreshing(false);
+          setRefreshProgress(null);
+        }
+      }, 3000);
     } catch (error) {
       const message = error instanceof Error ? error.message : "刷新账户失败";
       toast.error(message);
-    } finally {
       setIsRefreshing(false);
     }
   };

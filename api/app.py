@@ -5,7 +5,7 @@ from threading import Event
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from api import accounts, ai, image_tasks, register, system
 from api.errors import install_exception_handlers
@@ -52,12 +52,14 @@ def create_app() -> FastAPI:
     async def serve_web(full_path: str):
         asset = resolve_web_asset(full_path)
         if asset is not None:
-            return FileResponse(asset)
+            content = asset.read_bytes()
+            mt = "text/html" if asset.suffix == ".html" else None
+            return Response(content=content, media_type=mt)
         if full_path.strip("/").startswith("_next/"):
             raise HTTPException(status_code=404, detail="Not Found")
         fallback = resolve_web_asset("")
         if fallback is None:
             raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(fallback)
+        return Response(content=fallback.read_bytes(), media_type="text/html")
 
     return app

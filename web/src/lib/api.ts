@@ -311,10 +311,14 @@ export async function deleteAccounts(tokens: string[]) {
 }
 
 export async function refreshAccounts(accessTokens: string[]) {
-  return httpRequest<AccountRefreshResponse>("/api/accounts/refresh", {
+  return httpRequest<{ started?: boolean; total?: number; refreshed?: number; errors?: Array<{ access_token: string; error: string }>; items?: Account[] }>("/api/accounts/refresh", {
     method: "POST",
     body: { access_tokens: accessTokens },
   });
+}
+
+export async function fetchRefreshProgress() {
+  return httpRequest<{ running: boolean; total: number; done: number; errors: number }>("/api/accounts/refresh/progress");
 }
 
 function getFilenameFromDisposition(value: unknown, fallback: string) {

@@ -239,7 +239,14 @@ def create_router() -> APIRouter:
             access_tokens = account_service.list_tokens()
         if not access_tokens:
             raise HTTPException(status_code=400, detail={"error": "access_tokens is required"})
-        return account_service.refresh_accounts(access_tokens)
+        # 在背景執行全部刷新，不阻塞請求
+        account_service.start_background_refresh(access_tokens)
+        return {"started": True, "total": len(access_tokens)}
+
+    @router.get("/api/accounts/refresh/progress")
+    async def refresh_progress(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return account_service.get_refresh_progress()
 
     @router.post("/api/accounts/export")
     async def export_accounts(body: AccountExportRequest, authorization: str | None = Header(default=None)):

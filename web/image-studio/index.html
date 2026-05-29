@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Image Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #09090b; --bg2: #18181b; --bg3: #27272a; --bg-hover: #3f3f46;
+  --border: #27272a; --border-light: #3f3f46;
+  --text: #fafafa; --text2: #a1a1aa; --text3: #71717a;
+  --accent: #a78bfa; --accent2: #8b5cf6; --accent-glow: rgba(139,92,246,0.15);
+  --green: #34d399; --red: #f87171; --yellow: #fbbf24;
+  --radius: 12px; --radius-sm: 8px; --radius-lg: 16px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+
+/* SVG Icon helper */
+.icon-svg, svg.icon-svg { width: 1em; height: 1em; fill: currentColor; display: inline-block; vertical-align: middle; }
+svg { fill: currentColor; }
+/* Force all SVGs inside buttons/text to be properly sized */
+button svg, .btn svg, .nav-item svg, .topbar-title svg, .logo-icon svg { width: 16px; height: 16px; flex-shrink: 0; }
+.model-card .model-icon svg { width: 24px; height: 24px; flex-shrink: 0; }
+.upload-zone .upload-icon svg { width: 32px; height: 32px; flex-shrink: 0; }
+.gallery-empty .empty-icon svg { width: 48px; height: 48px; }
+.lightbox-close svg { width: 20px; height: 20px; }
+.overlay-btn svg { width: 14px; height: 14px; }
+.toast svg { width: 16px; height: 16px; flex-shrink: 0; }
+.img-card.error svg { width: 24px; height: 24px; }
+
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* ── Sidebar ── */
+.sidebar { width: 260px; min-width: 260px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+.sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
+.sidebar-logo { display: flex; align-items: center; gap: 10px; }
+.sidebar-logo .logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent), #ec4899); border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.sidebar-logo .logo-icon svg { width: 16px; height: 16px; fill: #fff; }
+.sidebar-logo span { font-size: 16px; font-weight: 600; background: linear-gradient(135deg, var(--accent), #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.sidebar-nav { padding: 12px; flex: 1; overflow-y: auto; }
+.nav-section { margin-bottom: 16px; }
+.nav-section-title { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; padding: 0 12px; margin-bottom: 4px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition); font-size: 14px; color: var(--text2); border: none; background: none; width: 100%; text-align: left; }
+.nav-item:hover { background: var(--bg3); color: var(--text); }
+.nav-item.active { background: var(--accent-glow); color: var(--accent); font-weight: 500; }
+.nav-item .nav-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
+.nav-item .nav-icon svg { width: 16px; height: 16px; fill: currentColor; }
+.nav-item .nav-badge { margin-left: auto; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 10px; }
+.sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text3); }
+
+/* ── Main ── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.topbar { height: 56px; min-height: 56px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 24px; gap: 12px; background: var(--bg); }
+.topbar-title { font-size: 15px; font-weight: 600; flex: 1; display: flex; align-items: center; gap: 8px; }
+.topbar-title svg { width: 18px; height: 18px; fill: var(--accent); }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition); border: none; font-family: inherit; white-space: nowrap; }
+.btn svg { width: 14px; height: 14px; fill: currentColor; }
+.btn-primary { background: linear-gradient(135deg, var(--accent2), #7c3aed); color: #fff; }
+.btn-primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--bg3); color: var(--text); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+.btn-danger:hover { background: rgba(248,113,113,0.1); }
+
+/* ── Content ── */
+.content { flex: 1; display: flex; overflow: hidden; }
+.panel-left { width: 400px; min-width: 400px; border-right: 1px solid var(--border); overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; background: var(--bg); }
+.panel-section { display: flex; flex-direction: column; gap: 8px; }
+.panel-label { font-size: 12px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* ── Tabs ── */
+.tabs { display: flex; background: var(--bg2); border-radius: var(--radius); padding: 3px; }
+.tab { flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 9px; transition: var(--transition); color: var(--text3); border: none; background: none; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tab svg { width: 14px; height: 14px; fill: currentColor; }
+.tab.active { background: var(--bg3); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+
+/* ── Textarea ── */
+.prompt-input { width: 100%; min-height: 120px; padding: 14px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 14px; font-family: inherit; line-height: 1.6; resize: vertical; transition: var(--transition); }
+.prompt-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.prompt-input::placeholder { color: var(--text3); }
+.prompt-actions { display: flex; justify-content: space-between; align-items: center; }
+.char-count { font-size: 11px; color: var(--text3); }
+
+/* ── Upload Zone ── */
+.upload-zone { border: 2px dashed var(--border-light); border-radius: var(--radius); padding: 32px 20px; text-align: center; cursor: pointer; transition: var(--transition); position: relative; }
+.upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+.upload-zone.has-image { padding: 8px; }
+.upload-zone .upload-icon { margin-bottom: 8px; }
+.upload-zone .upload-icon svg { width: 32px; height: 32px; fill: var(--text3); }
+.upload-zone .upload-text { font-size: 14px; color: var(--text2); }
+.upload-zone .upload-hint { font-size: 12px; color: var(--text3); margin-top: 4px; }
+.upload-preview { max-width: 100%; max-height: 200px; border-radius: var(--radius-sm); display: block; }
+.upload-remove { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.upload-remove svg { width: 12px; height: 12px; fill: #fff; }
+#fileInput { display: none; }
+
+/* ── Model Cards ── */
+.model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.model-card { padding: 14px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition); text-align: center; }
+.model-card:hover { border-color: var(--border-light); }
+.model-card.active { border-color: var(--accent); background: var(--accent-glow); }
+.model-card .model-icon { margin-bottom: 6px; display: flex; justify-content: center; }
+.model-card .model-icon svg { width: 24px; height: 24px; fill: var(--accent); }
+.model-card .model-name { font-size: 13px; font-weight: 500; }
+.model-card .model-desc { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+/* ── Size Grid ── */
+.size-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.size-card { padding: 10px 6px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition); text-align: center; font-size: 12px; color: var(--text2); }
+.size-card:hover { border-color: var(--border-light); color: var(--text); }
+.size-card.active { border-color: var(--accent); background: var(--accent-glow); color: var(--accent); }
+.size-card .size-label { font-weight: 500; }
+.size-card .size-desc { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+/* ── Quality ── */
+.quality-row { display: flex; gap: 6px; }
+.quality-card { flex: 1; padding: 10px 6px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition); text-align: center; font-size: 12px; color: var(--text2); }
+.quality-card:hover { border-color: var(--border-light); color: var(--text); }
+.quality-card.active { border-color: var(--accent); background: var(--accent-glow); color: var(--accent); }
+
+/* ── Number Input ── */
+.number-input { width: 100%; padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: inherit; transition: var(--transition); text-align: center; }
+.number-input:focus { outline: none; border-color: var(--accent); }
+
+/* ── Generate Button ── */
+.generate-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 28px; background: linear-gradient(135deg, var(--accent2), #ec4899); color: #fff; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; transition: var(--transition); font-family: inherit; margin: 0 auto; }
+.generate-btn:hover { filter: brightness(1.15); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(139,92,246,0.3); }
+.generate-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.generate-btn .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Gallery ── */
+.panel-right { flex: 1; overflow-y: auto; padding: 24px; background: var(--bg); }
+.gallery-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.gallery-title { font-size: 18px; font-weight: 700; }
+.gallery-subtitle { font-size: 13px; color: var(--text3); margin-top: 2px; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.gallery-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--text3); text-align: center; }
+.gallery-empty .empty-icon { margin-bottom: 16px; }
+.gallery-empty .empty-icon svg { width: 48px; height: 48px; fill: var(--text3); opacity: 0.3; }
+.gallery-empty .empty-text { font-size: 15px; }
+.gallery-empty .empty-hint { font-size: 13px; margin-top: 4px; }
+
+/* ── Image Card ── */
+.img-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: var(--transition); }
+.img-card:hover { border-color: var(--border-light); box-shadow: var(--shadow); }
+.img-card-img-wrap { position: relative; aspect-ratio: 1; background: var(--bg3); overflow: hidden; }
+.img-card-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; cursor: pointer; }
+.img-card:hover .img-card-img { transform: scale(1.03); }
+.img-card-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%); opacity: 0; transition: var(--transition); display: flex; align-items: flex-end; padding: 12px; gap: 6px; }
+.img-card:hover .img-card-overlay { opacity: 1; }
+.overlay-btn { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-size: 12px; font-weight: 500; font-family: inherit; transition: var(--transition); display: flex; align-items: center; justify-content: center; gap: 4px; }
+.overlay-btn svg { width: 14px; height: 14px; }
+.overlay-btn.download { background: rgba(255,255,255,0.95); color: #18181b; }
+.overlay-btn.download svg { fill: #18181b; }
+.overlay-btn.download:hover { background: #fff; }
+.overlay-btn.copy { background: rgba(255,255,255,0.2); color: #fff; }
+.overlay-btn.copy svg { fill: #fff; }
+.overlay-btn.copy:hover { background: rgba(255,255,255,0.3); }
+.img-card-info { padding: 12px 14px; }
+.img-card-prompt { font-size: 13px; color: var(--text2); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.img-card-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text3); }
+.img-card-meta .meta-model { background: var(--bg3); padding: 2px 8px; border-radius: 6px; }
+
+/* ── Loading / Error Card ── */
+.img-card.loading .img-card-img-wrap { display: flex; align-items: center; justify-content: center; }
+.img-card.loading .img-card-img { display: none; }
+.loading-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; animation: pulse 1.4s ease-in-out infinite; }
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+.img-card.error .img-card-img-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--red); }
+.img-card.error .img-card-img { display: none; }
+
+/* ── Lightbox ── */
+.lightbox { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: 0.3s; }
+.lightbox.open { opacity: 1; pointer-events: all; }
+.lightbox-img { max-width: 90vw; max-height: 90vh; border-radius: var(--radius); box-shadow: 0 0 60px rgba(0,0,0,0.5); }
+.lightbox-close { position: absolute; top: 20px; right: 24px; width: 40px; height: 40px; background: rgba(255,255,255,0.1); border: none; border-radius: 50%; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: var(--transition); }
+.lightbox-close:hover { background: rgba(255,255,255,0.2); }
+.lightbox-close svg { width: 20px; height: 20px; fill: #fff; }
+.lightbox-actions { position: absolute; bottom: 24px; display: flex; gap: 8px; }
+.lightbox-prompt { position: absolute; bottom: 72px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text2); max-width: 600px; text-align: center; }
+
+/* ── Toast ── */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+.toast { padding: 12px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; }
+.toast svg { width: 16px; height: 16px; fill: currentColor; }
+.toast.success { background: #064e3b; color: var(--green); border: 1px solid #065f46; }
+.toast.error { background: #7f1d1d; color: var(--red); border: 1px solid #991b1b; }
+.toast.info { background: var(--bg3); color: var(--text); border: 1px solid var(--border-light); }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes fadeOut { to { opacity: 0; transform: translateY(8px); } }
+
+/* ── Suggestions ── */
+.prompt-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.suggestion-chip { padding: 5px 10px; border-radius: 20px; background: var(--bg3); border: 1px solid var(--border); font-size: 12px; color: var(--text2); cursor: pointer; transition: var(--transition); font-family: inherit; }
+.suggestion-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Responsive ── */
+@media (max-width: 900px) { .panel-left { width: 320px; min-width: 320px; } .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); } }
+@media (max-width: 700px) { .sidebar { display: none; } .content { flex-direction: column; } .panel-left { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid var(--border); max-height: 50vh; } }
+</style>
+</head>
+<body>
+
+<!-- SVG Sprite (hidden) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="icon-sparkle" viewBox="0 0 24 24"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></symbol>
+  <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+  <symbol id="icon-image" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></symbol>
+  <symbol id="icon-gallery" viewBox="0 0 24 24"><path d="M22 16V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2zm-11-4l2.03 2.71L16 11l4 5H8l3-4zM2 6v14c0 1.1.9 2 2 2h14v-2H4V6H2z"/></symbol>
+  <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+  <symbol id="icon-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+  <symbol id="icon-download" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></symbol>
+  <symbol id="icon-link" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 000 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 000-10z"/></symbol>
+  <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+  <symbol id="icon-error" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></symbol>
+  <symbol id="icon-info" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
+  <symbol id="icon-wand" viewBox="0 0 24 24"><path d="M7.5 5.6L10 7 8.6 4.5 10 2 7.5 3.4 5 2l1.4 2.5L5 7zm12 9.8L17 14l1.4 2.5L17 19l2.5-1.4L22 19l-1.4-2.5L22 14zM22 2l-2.5 1.4L17 2l1.4 2.5L17 7l2.5-1.4L22 7l-1.4-2.5zm-7.63 5.29a.996.996 0 00-1.41 0L1.29 18.96a.996.996 0 000 1.41l2.34 2.34c.39.39 1.02.39 1.41 0L16.7 11.05a.996.996 0 000-1.41l-2.33-2.35z"/></symbol>
+</svg>
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="logo-icon"><svg><use href="#icon-sparkle"/></svg></div>
+        <span>Image Studio</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-title">創作</div>
+        <button class="nav-item active" onclick="switchMode('generate')" id="nav-generate">
+          <span class="nav-icon"><svg><use href="#icon-sparkle"/></svg></span> 文生圖
+        </button>
+        <button class="nav-item" onclick="switchMode('edit')" id="nav-edit">
+          <span class="nav-icon"><svg><use href="#icon-edit"/></svg></span> 圖片編輯
+        </button>
+        <button class="nav-item" onclick="switchMode('img2img')" id="nav-img2img">
+          <span class="nav-icon"><svg><use href="#icon-image"/></svg></span> 圖生圖
+        </button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-title">瀏覽</div>
+        <button class="nav-item" onclick="scrollToGallery()">
+          <span class="nav-icon"><svg><use href="#icon-gallery"/></svg></span> 我的作品
+          <span class="nav-badge" id="galleryCount">0</span>
+        </button>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div>API: gpt.cheyuyu.com</div>
+      <div style="margin-top:4px">Powered by chatgpt2api</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-title">
+        <svg><use href="#icon-sparkle"/></svg>
+        <span id="pageTitle">文生圖</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-danger btn-sm" onclick="clearHistory()">
+          <svg><use href="#icon-trash"/></svg> 清除
+        </button>
+      </div>
+    </div>
+
+    <div class="content">
+      <!-- Left Panel -->
+      <div class="panel-left" id="panelLeft">
+        <!-- Mode Tabs -->
+        <div class="tabs" id="modeTabs">
+          <button class="tab active" onclick="switchMode('generate')" id="tab-generate">
+            <svg><use href="#icon-sparkle"/></svg> 文生圖
+          </button>
+          <button class="tab" onclick="switchMode('edit')" id="tab-edit">
+            <svg><use href="#icon-edit"/></svg> 編輯
+          </button>
+          <button class="tab" onclick="switchMode('img2img')" id="tab-img2img">
+            <svg><use href="#icon-image"/></svg> 圖生圖
+          </button>
+        </div>
+
+        <!-- Upload Zone -->
+        <div id="uploadSection" style="display:none;">
+          <div class="panel-label">上傳參考圖片</div>
+          <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon"><svg><use href="#icon-upload"/></svg></div>
+            <div class="upload-text">點擊或拖曳上傳圖片</div>
+            <div class="upload-hint">支援 PNG、JPG、WebP</div>
+          </div>
+          <input type="file" id="fileInput" accept="image/*" onchange="handleFileUpload(event)">
+        </div>
+
+        <!-- Prompt -->
+        <div class="panel-section">
+          <div class="panel-label" id="promptLabel">描述你想要的圖片</div>
+          <textarea class="prompt-input" id="promptInput" placeholder="例如：一隻在櫻花樹下睡覺的橘貓，陽光照射，夢幻風格..." oninput="updateCharCount()"></textarea>
+          <div class="prompt-actions"><div class="char-count"><span id="charCount">0</span> / 4000</div></div>
+        </div>
+
+        <!-- Suggestions -->
+        <div>
+          <div class="panel-label" style="display:flex;align-items:center;justify-content:space-between">
+            <span>靈感</span>
+            <button class="btn btn-ghost btn-sm" onclick="refreshSuggestions()" style="padding:4px 10px;font-size:11px">
+              <svg style="width:12px;height:12px"><use href="#icon-sparkle"/></svg> 換一批
+            </button>
+          </div>
+          <div class="prompt-suggestions" id="suggestions">
+            <div style="padding:8px;color:var(--text3);font-size:12px"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px"></div> AI 生成中...</div>
+          </div>
+        </div>
+
+        <!-- Model -->
+        <div>
+          <div class="panel-label">模型</div>
+          <div class="model-grid">
+            <div class="model-card active" onclick="selectModel('gpt-image-2')" data-model="gpt-image-2">
+              <div class="model-icon"><svg><use href="#icon-sparkle"/></svg></div>
+              <div class="model-name">GPT-Image-2</div>
+              <div class="model-desc">最新 · 高品質</div>
+            </div>
+            <div class="model-card" onclick="selectModel('codex-gpt-image-2')" data-model="codex-gpt-image-2">
+              <div class="model-icon"><svg><use href="#icon-wand"/></svg></div>
+              <div class="model-name">Codex-GPT-Image-2</div>
+              <div class="model-desc">Codex · 創意</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Size -->
+        <div>
+          <div class="panel-label">尺寸</div>
+          <div class="size-grid">
+            <div class="size-card active" onclick="selectSize(this, 'auto')" data-size="auto">
+              <div class="size-label">Auto</div>
+              <div class="size-desc">自動</div>
+            </div>
+            <div class="size-card" onclick="selectSize(this, '1024x1024')" data-size="1024x1024">
+              <div class="size-label">1:1</div>
+              <div class="size-desc">1024×1024</div>
+            </div>
+            <div class="size-card" onclick="selectSize(this, '1536x1024')" data-size="1536x1024">
+              <div class="size-label">3:2</div>
+              <div class="size-desc">1536×1024</div>
+            </div>
+            <div class="size-card" onclick="selectSize(this, '1024x1536')" data-size="1024x1536">
+              <div class="size-label">2:3</div>
+              <div class="size-desc">1024×1536</div>
+            </div>
+            <div class="size-card" onclick="selectSize(this, '1792x1024')" data-size="1792x1024">
+              <div class="size-label">16:9</div>
+              <div class="size-desc">1792×1024</div>
+            </div>
+            <div class="size-card" onclick="selectSize(this, '1024x1792')" data-size="1024x1792">
+              <div class="size-label">9:16</div>
+              <div class="size-desc">1024×1792</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quality -->
+        <div>
+          <div class="panel-label">品質</div>
+          <div class="quality-row">
+            <div class="quality-card active" onclick="selectQuality('auto')" data-quality="auto">Auto</div>
+            <div class="quality-card" onclick="selectQuality('high')" data-quality="high">高畫質</div>
+            <div class="quality-card" onclick="selectQuality('medium')" data-quality="medium">中等</div>
+            <div class="quality-card" onclick="selectQuality('low')" data-quality="low">快速</div>
+          </div>
+        </div>
+
+        <!-- Count -->
+        <div>
+          <div class="panel-label">數量</div>
+          <input type="number" class="number-input" id="nSelect" value="1" min="1" max="4">
+        </div>
+
+        <!-- Generate -->
+        <button class="generate-btn" id="generateBtn" onclick="generate()">
+          <span id="btnText"><svg><use href="#icon-sparkle"/></svg> 開始生成</span>
+        </button>
+      </div>
+
+      <!-- Right Panel: Gallery -->
+      <div class="panel-right">
+        <div class="gallery-header">
+          <div>
+            <div class="gallery-title">我的作品</div>
+            <div class="gallery-subtitle">生成的圖片將顯示在這裡</div>
+          </div>
+        </div>
+        <div class="gallery-grid" id="gallery">
+          <div class="gallery-empty" id="galleryEmpty">
+            <div class="empty-icon"><svg><use href="#icon-gallery"/></svg></div>
+            <div class="empty-text">還沒有作品</div>
+            <div class="empty-hint">輸入描述並點擊生成，開始創作吧！</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="closeLightbox()"><svg><use href="#icon-close"/></svg></button>
+  <div class="lightbox-prompt" id="lightboxPrompt"></div>
+  <img class="lightbox-img" id="lightboxImg" src="" alt="">
+  <div class="lightbox-actions">
+    <button class="btn btn-ghost" onclick="downloadLightbox()"><svg><use href="#icon-download"/></svg> 下載</button>
+    <button class="btn btn-ghost" onclick="copyLightboxUrl()"><svg><use href="#icon-link"/></svg> 複製連結</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const API_BASE = '';
+const API_KEY = 'sk-AemCefXkjwOwUn9dCUy0p0dKnP1UQRCL';
+
+let currentMode = 'generate';
+let currentModel = 'gpt-image-2';
+let currentSize = 'auto';
+let currentQuality = 'auto';
+let uploadedImageBase64 = null;
+let gallery = [];
+let lightboxUrl = '';
+let generating = false;
+
+// ── Mode ──
+function switchMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + mode)?.classList.add('active');
+  document.getElementById('nav-' + mode)?.classList.add('active');
+  const titles = { generate: '文生圖', edit: '圖片編輯', img2img: '圖生圖' };
+  document.getElementById('pageTitle').textContent = titles[mode];
+  const uploadSection = document.getElementById('uploadSection');
+  const promptLabel = document.getElementById('promptLabel');
+  const placeholder = { generate: '例如：一隻在櫻花樹下睡覺的橘貓，陽光照射，夢幻風格...', edit: '例如：把背景改成海邊夕陽，加上海鷗...', img2img: '例如：把這隻貓變成太空人風格...' };
+  if (mode === 'generate') { uploadSection.style.display = 'none'; promptLabel.textContent = '描述你想要的圖片'; }
+  else { uploadSection.style.display = 'block'; promptLabel.textContent = mode === 'edit' ? '描述如何編輯這張圖片' : '描述你想要的變化'; }
+  document.getElementById('promptInput').placeholder = placeholder[mode];
+  clearUpload();
+}
+
+// ── File Upload ──
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { showToast('請上傳圖片檔案', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    uploadedImageBase64 = e.target.result;
+    const zone = document.getElementById('uploadZone');
+    zone.classList.add('has-image');
+    zone.innerHTML = `<img class="upload-preview" src="${uploadedImageBase64}" alt="preview"><button class="upload-remove" onclick="clearUpload()"><svg><use href="#icon-close"/></svg></button>`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearUpload() {
+  uploadedImageBase64 = null;
+  document.getElementById('fileInput').value = '';
+  const zone = document.getElementById('uploadZone');
+  zone.classList.remove('has-image');
+  zone.innerHTML = `<div class="upload-icon"><svg><use href="#icon-upload"/></svg></div><div class="upload-text">點擊或拖曳上傳圖片</div><div class="upload-hint">支援 PNG、JPG、WebP</div>`;
+}
+
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => { uploadZone.classList.remove('dragover'); });
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault(); uploadZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) { document.getElementById('fileInput').files = e.dataTransfer.files; handleFileUpload({ target: { files: [file] } }); }
+});
+
+// ── AI Suggestions ──
+async function refreshSuggestions() {
+  const container = document.getElementById('suggestions');
+  container.innerHTML = '<div style="padding:8px;color:var(--text3);font-size:12px"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px"></div> AI 生成中...</div>';
+
+  try {
+    const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a creative assistant. Generate 2 random, diverse image generation prompt ideas. Output in this exact JSON format: [{"label":"short label with emoji","prompt":"detailed Chinese description"}]. Be creative and varied - different themes, styles, subjects each time.' },
+          { role: 'user', content: 'Give me 2 creative image prompt ideas.' }
+        ],
+        max_tokens: 300,
+        temperature: 0.9
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      let ideas = [];
+      try {
+        ideas = JSON.parse(text);
+      } catch {
+        // Try to extract JSON from text
+        const match = text.match(/\[[\s\S]*?\]/);
+        if (match) ideas = JSON.parse(match[0]);
+      }
+      if (ideas.length >= 2) {
+        container.innerHTML = ideas.slice(0, 2).map(idea =>
+          `<button class="suggestion-chip" data-prompt="${idea.prompt.replace(/"/g, '&quot;')}">${idea.label}</button>`
+        ).join('');
+        // Re-bind events
+        container.querySelectorAll('.suggestion-chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            const prompt = chip.dataset.prompt;
+            if (prompt) autoGenerate(prompt);
+          });
+        });
+        showToast('✨ 新靈感已生成', 'success');
+        return;
+      }
+    }
+  } catch (e) {}
+
+  // Fallback
+  container.innerHTML = `
+    <button class="suggestion-chip" data-prompt="一隻在星空下奔跑的白狼，極光背景，史詩風格">🐺 星空白狼</button>
+    <button class="suggestion-chip" data-prompt="賽博龐克風格的東京街景，霓虹燈，雨夜，8K">🌃 賽博東京</button>`;
+  container.querySelectorAll('.suggestion-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const prompt = chip.dataset.prompt;
+      if (prompt) autoGenerate(prompt);
+    });
+  });
+  showToast('AI 生成失敗，使用預設', 'error');
+}
+function updateCharCount() { document.getElementById('charCount').textContent = document.getElementById('promptInput').value.length; }
+function setPrompt(text) { document.getElementById('promptInput').value = text; updateCharCount(); }
+async function autoGenerate(prompt) {
+  document.getElementById('promptInput').value = prompt;
+  updateCharCount();
+  currentSize = 'auto';
+  currentQuality = 'auto';
+  document.querySelectorAll('.size-card').forEach(c => c.classList.remove('active'));
+  document.querySelector('.size-card[data-size="auto"]')?.classList.add('active');
+  document.querySelectorAll('.quality-card').forEach(c => c.classList.remove('active'));
+  document.querySelector('.quality-card[data-quality="auto"]')?.classList.add('active');
+  switchMode('generate');
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  document.getElementById('btnText').innerHTML = '<div class="spinner"></div> AI 擴展中...';
+
+  try {
+    const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are an expert at writing detailed image generation prompts. Given a short description, expand it into a rich, detailed prompt for AI image generation in English. Output ONLY the expanded prompt, no explanations. Keep it under 200 words.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 500,
+        temperature: 0.8
+      })
+    });
+
+    let expandedPrompt = prompt;
+    if (res.ok) {
+      const data = await res.json();
+      const aiText = data?.choices?.[0]?.message?.content?.trim();
+      if (aiText) expandedPrompt = aiText;
+    }
+
+    document.getElementById('promptInput').value = expandedPrompt;
+    updateCharCount();
+    showToast('✨ 提示詞已用 AI 擴展', 'success');
+  } catch (e) {
+    showToast('AI 擴展失敗，使用原始提示詞', 'error');
+  }
+
+  btn.disabled = false;
+  document.getElementById('btnText').innerHTML = '<svg><use href="#icon-sparkle"/></svg> 開始生成';
+}
+
+// ── Model / Size / Quality ──
+function selectModel(model) {
+  currentModel = model;
+  document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.model-card[data-model="${model}"]`)?.classList.add('active');
+}
+
+function selectSize(el, size) {
+  currentSize = size;
+  document.querySelectorAll('.size-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function selectQuality(quality) {
+  currentQuality = quality;
+  document.querySelectorAll('.quality-card').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.quality-card[data-quality="${quality}"]`)?.classList.add('active');
+}
+
+// ── IndexedDB Image Store ──
+const DB_NAME = 'ImageStudioDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'images';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveImageToDB(id, blob) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({ id, blob, time: Date.now() });
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch (e) { console.warn('DB save failed:', e); }
+}
+
+async function getImageFromDB(id) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(id);
+    return await new Promise((res, rej) => { req.onsuccess = () => res(req.result?.blob || null); req.onerror = rej; });
+  } catch (e) { return null; }
+}
+
+async function deleteImageFromDB(id) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch (e) {}
+}
+
+async function clearAllImages() {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).clear();
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch (e) {}
+}
+
+async function getAllImageIds() {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).getAllKeys();
+    return await new Promise((res, rej) => { req.onsuccess = () => res(req.result || []); req.onerror = rej; });
+  } catch (e) { return []; }
+}
+
+// Convert dataURL to Blob
+function dataURLtoBlob(dataURL) {
+  const parts = dataURL.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const bstr = atob(parts[1]);
+  const u8arr = new Uint8Array(bstr.length);
+  for (let i = 0; i < bstr.length; i++) u8arr[i] = bstr.charCodeAt(i);
+  return new Blob([u8arr], { type: mime });
+}
+
+// ── Generate ──
+async function generate() {
+  if (generating) return;
+  const prompt = document.getElementById('promptInput').value.trim();
+  if (!prompt) { showToast('請輸入描述', 'error'); return; }
+  if ((currentMode === 'edit' || currentMode === 'img2img') && !uploadedImageBase64) { showToast('請上傳參考圖片', 'error'); return; }
+
+  const n = Math.min(parseInt(document.getElementById('nSelect').value) || 1, 4);
+  generating = true;
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  document.getElementById('btnText').innerHTML = '<div class="spinner"></div> 生成中...';
+
+  const loadingIds = [];
+  for (let i = 0; i < n; i++) {
+    const id = 'img_' + Date.now() + '_' + i;
+    loadingIds.push(id);
+    addLoadingCard(id, prompt);
+  }
+
+  try {
+    let response;
+    if (currentMode === 'generate') {
+      const body = { model: currentModel, prompt, n: 1 };
+      if (currentSize !== 'auto') body.size = currentSize;
+      if (currentQuality !== 'auto') body.quality = currentQuality;
+      response = await fetch(`${API_BASE}/v1/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+        body: JSON.stringify(body)
+      });
+    } else {
+      const body = { model: currentModel, image: uploadedImageBase64.split(',')[1], prompt, n: 1 };
+      if (currentSize !== 'auto') body.size = currentSize;
+      if (currentQuality !== 'auto') body.quality = currentQuality;
+      response = await fetch(`${API_BASE}/v1/images/edits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+        body: JSON.stringify(body)
+      });
+    }
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API Error ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json();
+    const images = data.data || [];
+    for (let i = 0; i < loadingIds.length; i++) {
+      const id = loadingIds[i];
+      const imgData = images[i];
+      if (imgData) {
+        let url;
+        if (imgData.b64_json) url = `data:image/png;base64,${imgData.b64_json}`;
+        else if (imgData.url) url = imgData.url.replace('http://localhost:8000', window.location.origin);
+        replaceCardWithImage(id, url, prompt);
+      } else {
+        replaceCardWithError(id, '無圖片返回');
+      }
+    }
+    showToast(`成功生成 ${images.length} 張圖片`, 'success');
+  } catch (err) {
+    console.error(err);
+    loadingIds.forEach(id => replaceCardWithError(id, err.message));
+    showToast('生成失敗：' + err.message, 'error');
+  }
+
+  generating = false;
+  btn.disabled = false;
+  document.getElementById('btnText').innerHTML = '<svg><use href="#icon-sparkle"/></svg> 開始生成';
+}
+
+// ── Gallery ──
+function addLoadingCard(id, prompt) {
+  document.getElementById('galleryEmpty')?.remove();
+  const card = document.createElement('div');
+  card.className = 'img-card loading';
+  card.id = id;
+  card.innerHTML = `
+    <div class="img-card-img-wrap"><div class="loading-dots"><span></span><span></span><span></span></div></div>
+    <div class="img-card-info"><div class="img-card-prompt">${escapeHtml(prompt)}</div>
+    <div class="img-card-meta"><span class="meta-model">${currentModel}</span><span>${currentSize}</span></div></div>`;
+  document.getElementById('gallery').insertBefore(card, document.getElementById('gallery').firstChild);
+  updateGalleryCount();
+}
+
+function replaceCardWithImage(id, url, prompt) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.className = 'img-card';
+  card.dataset.imgUrl = url;
+  card.dataset.imgPrompt = prompt;
+  card.innerHTML = `
+    <div class="img-card-img-wrap">
+      <img class="img-card-img" src="${url}" alt="" loading="lazy">
+      <div class="img-card-overlay">
+        <button class="overlay-btn download"><svg><use href="#icon-download"/></svg> 下載</button>
+        <button class="overlay-btn copy"><svg><use href="#icon-link"/></svg> 複製</button>
+      </div>
+    </div>
+    <div class="img-card-info">
+      <div class="img-card-prompt">${escapeHtml(prompt)}</div>
+      <div class="img-card-meta"><span class="meta-model">${currentModel}</span><span>${currentSize}</span></div>
+    </div>`;
+  // Bind events
+  card.querySelector('.img-card-img').addEventListener('click', () => openLightbox(url, prompt));
+  card.querySelector('.download').addEventListener('click', () => downloadImage(url));
+  card.querySelector('.copy').addEventListener('click', () => copyImageUrl(url));
+  gallery.unshift({ id, url, prompt, model: currentModel, size: currentSize, time: Date.now() });
+  if (url.startsWith('data:')) {
+    saveImageToDB(id, dataURLtoBlob(url));
+  }
+  saveHistory();
+}
+
+function replaceCardWithError(id, error) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.className = 'img-card error';
+  card.innerHTML = `<div class="img-card-img-wrap"><div style="font-size:24px;display:flex;justify-content:center;"><svg width="24" height="24" fill="var(--red)"><use href="#icon-error"/></svg></div><div style="font-size:12px;color:var(--red);text-align:center;padding:0 8px;">${escapeHtml(error)}</div></div>`;
+  setTimeout(() => card.remove(), 8000);
+}
+
+function updateGalleryCount() {
+  const count = document.querySelectorAll('.img-card:not(.loading):not(.error)').length;
+  document.getElementById('galleryCount').textContent = count;
+}
+
+// ── Lightbox ──
+function openLightbox(url, prompt) {
+  lightboxUrl = url;
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightboxPrompt').textContent = prompt;
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeLightbox(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('lightbox').classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('lightboxImg').src = '';
+}
+
+// ── Download / Copy ──
+async function downloadImage(url) {
+  try {
+    if (url.startsWith('data:')) {
+      const a = document.createElement('a'); a.href = url; a.download = `image-studio-${Date.now()}.png`; a.click();
+    } else {
+      const a = document.createElement('a'); a.href = url; a.download = `image-studio-${Date.now()}.png`; a.target = '_blank'; a.rel = 'noopener'; a.click();
+    }
+    showToast('已開始下載', 'success');
+  } catch (e) { showToast('下載失敗', 'error'); }
+}
+function downloadLightbox() { downloadImage(lightboxUrl); }
+function copyImageUrl(url) {
+  navigator.clipboard.writeText(url).then(() => showToast('已複製圖片連結', 'success')).catch(() => showToast('複製失敗', 'error'));
+}
+function copyLightboxUrl() { copyImageUrl(lightboxUrl); }
+
+// ── History ──
+function saveHistory() {
+  try {
+    // Only save metadata to localStorage (not image data)
+    const data = gallery.slice(0, 100).map(g => ({
+      id: g.id, prompt: g.prompt, model: g.model, size: g.size, time: g.time
+    }));
+    localStorage.setItem('imgStudio_meta', JSON.stringify(data));
+  } catch (e) {}
+}
+async function loadHistory() {
+  try {
+    const data = JSON.parse(localStorage.getItem('imgStudio_meta') || '[]');
+    gallery = data;
+    await renderHistory();
+  } catch (e) {}
+}
+async function renderHistory() {
+  const container = document.getElementById('gallery');
+  if (gallery.length === 0) {
+    container.innerHTML = `<div class="gallery-empty" id="galleryEmpty"><div class="empty-icon"><svg><use href="#icon-gallery"/></svg></div><div class="empty-text">還沒有作品</div><div class="empty-hint">輸入描述並點擊生成，開始創作吧！</div></div>`;
+    return;
+  }
+  container.innerHTML = '';
+  for (const item of gallery) {
+    // Try to load image from IndexedDB
+    let url = '';
+    if (item.id) {
+      const blob = await getImageFromDB(item.id);
+      if (blob) url = URL.createObjectURL(blob);
+    }
+    const card = document.createElement('div');
+    card.className = 'img-card';
+    if (url) {
+      card.innerHTML = `
+        <div class="img-card-img-wrap">
+          <img class="img-card-img" src="${url}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:40px;text-align:center;color:var(--text3);\\'>圖片過期</div>'">
+          <div class="img-card-overlay">
+            <button class="overlay-btn download" onclick="downloadImage('${url}')"><svg><use href="#icon-download"/></svg> 下載</button>
+            <button class="overlay-btn copy" onclick="copyImageUrl('${url}')"><svg><use href="#icon-link"/></svg> 複製</button>
+          </div>
+        </div>
+        <div class="img-card-info"><div class="img-card-prompt">${escapeHtml(item.prompt)}</div>
+        <div class="img-card-meta"><span class="meta-model">${item.model || 'gpt-image-2'}</span><span>${item.size || 'auto'}</span></div></div>`;
+    } else {
+      card.innerHTML = `
+        <div class="img-card-img-wrap"><div style="padding:40px;text-align:center;color:var(--text3);"><svg width="32" height="32" fill="var(--text3)" opacity="0.3"><use href="#icon-image"/></svg></div></div>
+        <div class="img-card-info"><div class="img-card-prompt">${escapeHtml(item.prompt)}</div>
+        <div class="img-card-meta"><span class="meta-model">${item.model || 'gpt-image-2'}</span><span>${item.size || 'auto'}</span></div></div>`;
+    }
+    container.appendChild(card);
+  }
+  updateGalleryCount();
+}
+async function clearHistory() {
+  if (!confirm('確定要清除所有歷史記錄嗎？')) return;
+  gallery = [];
+  localStorage.removeItem('imgStudio_meta');
+  await clearAllImages();
+  const container = document.getElementById('gallery');
+  container.innerHTML = `<div class="gallery-empty" id="galleryEmpty"><div class="empty-icon"><svg><use href="#icon-gallery"/></svg></div><div class="empty-text">還沒有作品</div><div class="empty-hint">輸入描述並點擊生成，開始創作吧！</div></div>`;
+  updateGalleryCount();
+  showToast('歷史記錄已清除', 'info');
+}
+function scrollToGallery() { document.querySelector('.panel-right').scrollIntoView({ behavior: 'smooth' }); }
+
+// ── Toast ──
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  const icons = { success: '#icon-check', error: '#icon-error', info: '#icon-info' };
+  toast.innerHTML = `<svg><use href="${icons[type] || '#icon-info'}"/></svg> ${msg}`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// ── Utils ──
+function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+function escapeJs(str) { return str.replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); if (e.ctrlKey && e.key === 'Enter' && !generating) generate(); });
+
+// ── Init ──
+loadHistory();
+updateCharCount();
+setTimeout(updateGalleryCount, 500);
+
+// Generate AI suggestions on load
+refreshSuggestions();
+
+// Bind suggestion chips
+document.querySelectorAll('.suggestion-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const prompt = chip.dataset.prompt;
+    if (prompt) autoGenerate(prompt);
+  });
+});
+
+// Expose functions to global scope for inline onclick handlers
+window.autoGenerate = autoGenerate;
+window.setPrompt = setPrompt;
+window.switchMode = switchMode;
+window.generate = generate;
+window.clearHistory = clearHistory;
+window.scrollToGallery = scrollToGallery;
+window.openLightbox = openLightbox;
+window.closeLightbox = closeLightbox;
+window.downloadImage = downloadImage;
+window.downloadLightbox = downloadLightbox;
+window.copyImageUrl = copyImageUrl;
+window.copyLightboxUrl = copyLightboxUrl;
+</script>
+</body>
+</html>

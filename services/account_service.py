@@ -44,6 +44,9 @@ class AccountService:
         self._image_inflight: dict[str, int] = {}
         self._token_aliases: dict[str, str] = {}
         self._cumulative_total = self._load_cumulative_total()
+        self._auto_save = True
+        self._refresh_thread: Any = None
+        self._refresh_progress: dict = {"running": False, "total": 0, "done": 0, "errors": 0}
 
     def _get_cumulative_file(self) -> Path:
         from services.config import DATA_DIR
@@ -57,6 +60,53 @@ class AccountService:
         except Exception:
             pass
         return len(self._accounts)
+
+    def get_refresh_progress(self) -> dict:
+        return dict(self._refresh_progress)
+
+    def start_background_refresh(self, access_tokens: list[str]) -> None:
+        """在背景分批刷新帳號，避免阻塞請求"""
+        import threading
+
+        if self._refresh_progress.get("running"):
+            return
+
+        self._refresh_progress = {"running": True, "total": len(access_tokens), "done": 0, "errors": 0}
+
+        def _run():
+            self._auto_save = False
+            try:
+                for i in range(0, len(access_tokens), 50):
+                    batch = access_tokens[i : i + 50]
+                    self._refresh_batch(batch)
+                    self._refresh_progress["done"] = min(i + 50, len(access_tokens))
+            finally:
+                self._auto_save = True
+                self._save_accounts()
+                self._refresh_progress["running"] = False
+                self._refresh_progress["done"] = len(access_tokens)
+
+        self._refresh_thread = threading.Thread(target=_run, daemon=True, name="account-refresh")
+        self._refresh_thread.start()
+
+    def _refresh_batch(self, tokens: list[str]) -> None:
+        """刷新一批帳號，每批最多 50 個，批次間有延遲"""
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        max_workers = min(3, len(tokens))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._fetch_remote_info_silent, token, "refresh_accounts"): token
+                for token in tokens
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception:
+                    self._refresh_progress["errors"] += 1
+        # 批次間休息 2 秒，避免打太快被 OpenAI 擋
+        time.sleep(2)
 
     def _save_cumulative_total(self) -> None:
         try:
@@ -114,6 +164,8 @@ class AccountService:
         }
 
     def _save_accounts(self) -> None:
+        if not self._auto_save:
+            return
         self.storage.save_accounts(list(self._accounts.values()))
 
     @staticmethod
@@ -825,28 +877,67 @@ class AccountService:
         self._record_refresh_success(active_token)
         return self.update_account(active_token, result)
 
-    def refresh_accounts(self, access_tokens: list[str]) -> dict[str, Any]:
+    def _fetch_remote_info_silent(self, access_token: str, event: str = "fetch_remote_info") -> dict[str, Any] | None:
+        """同 fetch_remote_info，但更新後不觸發 _save_accounts（由 caller 批次寫入）"""
+        if not access_token:
+            raise ValueError("access_token is required")
+
+        active_token = self.refresh_access_token(access_token, event=f"{event}:preflight") or access_token
+        try:
+            from services.openai_backend_api import InvalidAccessTokenError, OpenAIBackendAPI
+            result = OpenAIBackendAPI(active_token).get_user_info()
+        except InvalidAccessTokenError as exc:
+            refreshed_token = self.refresh_access_token(active_token, force=True, event=event + ":invalid_access_token")
+            if refreshed_token and refreshed_token != active_token:
+                try:
+                    result = OpenAIBackendAPI(refreshed_token).get_user_info()
+                except InvalidAccessTokenError as retry_exc:
+                    if self._record_invalid_token_seen(refreshed_token, event, str(retry_exc)):
+                        self.remove_invalid_token(refreshed_token, event)
+                    raise
+                active_token = refreshed_token
+            else:
+                if self._record_invalid_token_seen(active_token, event, str(exc)):
+                    self.remove_invalid_token(active_token, event)
+                raise
+        self._record_refresh_success(active_token)
+        # 直接更新 memory 中的帳號，不觸發 _save_accounts
+        with self._lock:
+            active_token = self._resolve_access_token_locked(active_token)
+            current = self._accounts.get(active_token)
+            if current is not None:
+                account = self._normalize_account({**current, **result, "access_token": active_token})
+                if account is not None:
+                    self._accounts[active_token] = account
+                    return dict(account)
+        return None
         access_tokens = list(dict.fromkeys(token for token in access_tokens if token))
         if not access_tokens:
             return {"refreshed": 0, "errors": [], "items": self.list_accounts()}
 
         refreshed = 0
         errors = []
-        max_workers = min(10, len(access_tokens))
+        max_workers = min(5, len(access_tokens))
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(self.fetch_remote_info, token, "refresh_accounts"): token
-                for token in access_tokens
-            }
-            for future in as_completed(futures):
-                try:
-                    account = future.result()
-                except Exception as exc:
-                    errors.append({"token": anonymize_token(futures[future]), "error": str(exc)})
-                    continue
-                if account is not None:
-                    refreshed += 1
+        # 暫停 _save_accounts 的自動寫入，全部完成後再一次性存檔
+        self._auto_save = False
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(self._fetch_remote_info_silent, token, "refresh_accounts"): token
+                    for token in access_tokens
+                }
+                for future in as_completed(futures):
+                    try:
+                        account = future.result()
+                    except Exception as exc:
+                        errors.append({"token": anonymize_token(futures[future]), "error": str(exc)})
+                        continue
+                    if account is not None:
+                        refreshed += 1
+        finally:
+            self._auto_save = True
+            self._save_accounts()
 
         return {
             "refreshed": refreshed,
