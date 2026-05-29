@@ -215,12 +215,14 @@ def create_router() -> APIRouter:
                 result["skipped"] = int(result.get("skipped") or 0) + int(extra_result.get("skipped") or 0)
         else:
             result = account_service.add_accounts(tokens)
-        refresh_result = account_service.refresh_accounts(tokens)
+        # 新增帳號後也在背景刷新，不阻塞請求
+        account_service.start_background_refresh(tokens)
         return {
             **result,
-            "refreshed": refresh_result.get("refreshed", 0),
-            "errors": refresh_result.get("errors", []),
-            "items": refresh_result.get("items", result.get("items", [])),
+            "refreshed": 0,
+            "refresh_started": True,
+            "errors": [],
+            "items": result.get("items", []),
         }
 
     @router.delete("/api/accounts")
